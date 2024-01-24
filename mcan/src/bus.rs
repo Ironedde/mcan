@@ -7,7 +7,7 @@ use crate::messageram::SharedMemoryInner;
 use crate::reg::{ecr::R as ECR, psr::R as PSR};
 use crate::rx_dedicated_buffers::RxDedicatedBuffer;
 use crate::rx_fifo::{Fifo0, Fifo1, RxFifo};
-use crate::tx_buffers::Tx;
+use crate::tx_buffers::{self, Tx};
 use crate::tx_event_fifo::TxEventFifo;
 use core::convert::From;
 use core::fmt::{self, Debug};
@@ -120,7 +120,7 @@ pub struct Can<'a, Id, D, C: Capacities> {
     /// Dedicated receive buffers
     pub rx_dedicated_buffers: RxDedicatedBuffer<'a, Id, C::RxBufferMessage>,
     /// Message transmission
-    pub tx: Tx<'a, Id, C>,
+    tx: Tx<'a, Id, C>,
     /// Events for successfully transmitted messages
     pub tx_event_fifo: TxEventFifo<'a, Id>,
     /// Auxiliary bits and bobs
@@ -156,6 +156,11 @@ pub trait DynAux {
     /// Enters Initialization mode, without enabling configuration, to
     /// disable CAN operation.
     fn initialization_mode(&self);
+
+    /// Sets MCAN up for being shut down
+    /// see. 3.1.8 `Power Down (sleep mode)` for user consideration regarding clocking and
+    /// message handling.
+    fn shutdown(&self);
 
     /// Re-enters "Normal Operation" if in "Software Initialization" mode.
     /// In Software Initialization, messages are not received or transmitted.
@@ -204,6 +209,11 @@ impl<'a, Id: mcan_core::CanId, D: mcan_core::Dependencies<Id>> DynAux for Aux<'a
 
     fn error_counters(&self) -> ErrorCounters {
         ErrorCounters(self.reg.ecr.read())
+    }
+
+    /// Shut down the bus in a controlled fashion
+    fn shutdown(&self) {
+        self.reg.cccr.write(|w| w.csr().set_bit() );
     }
 
     fn protocol_status(&self) -> ProtocolStatus {
@@ -586,5 +596,18 @@ impl<'a, Id: mcan_core::CanId, D: mcan_core::Dependencies<Id>, C: Capacities> Ca
     /// Disables the peripheral and makes the `Dependencies` available again.
     pub fn release(self) -> D {
         self.configure().release()
+    }
+
+    /// Get the tx line safely, will give error if the bus is shutting down.
+    pub fn tx<F,A>(&mut self, func: F) -> Result<A, nb::Error<tx_buffers::Error>>
+        where F: FnOnce(&mut Tx<'a, Id, C>) -> Result<A, nb::Error<tx_buffers::Error>> 
+    {
+        if self.aux.reg.cccr.read().csr().bit() && self.aux.is_operational() {
+            // Shutdown has been requsted but not complete
+            // we will not release the tx line since we don't want to send any more messeges
+            Err(nb::Error::WouldBlock)
+        } else {
+            func(&mut self.tx)
+        }
     }
 }
