@@ -220,7 +220,7 @@ impl<'a, Id: mcan_core::CanId, D: mcan_core::Dependencies<Id>> DynAux for Aux<'a
     }
 
     fn ready_for_shutdown(&self) -> bool {
-        self.reg.cccr.read().csa().bit_is_clear()
+        self.reg.cccr.read().csa().bit_is_set()
     }
 
     fn protocol_status(&self) -> ProtocolStatus {
