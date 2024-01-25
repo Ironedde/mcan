@@ -162,6 +162,9 @@ pub trait DynAux {
     /// message handling.
     fn shutdown(&self);
 
+    /// Check if csa bit is set
+    fn ready_for_shutdown(&self) -> bool;
+
     /// Re-enters "Normal Operation" if in "Software Initialization" mode.
     /// In Software Initialization, messages are not received or transmitted.
     /// Configuration cannot be changed. In Normal Operation, messages can
@@ -214,6 +217,10 @@ impl<'a, Id: mcan_core::CanId, D: mcan_core::Dependencies<Id>> DynAux for Aux<'a
     /// Shut down the bus in a controlled fashion
     fn shutdown(&self) {
         self.reg.cccr.write(|w| w.csr().set_bit() );
+    }
+
+    fn ready_for_shutdown(&self) -> bool {
+        self.reg.cccr.read().csa().bit_is_clear()
     }
 
     fn protocol_status(&self) -> ProtocolStatus {
